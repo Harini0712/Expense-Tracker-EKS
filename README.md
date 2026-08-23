@@ -8,6 +8,8 @@ A full-stack expense tracking app: React frontend, Flask REST API backend, Postg
 - **Backend:** Flask 3, Flask-SQLAlchemy, Flask-Migrate (Alembic), Flask-JWT-Extended, Flask-CORS
 - **Database:** PostgreSQL
 - **Auth:** JWT (JSON Web Tokens), passwords hashed with Werkzeug's `generate_password_hash`
+- <img width="1919" height="869" alt="image" src="https://github.com/user-attachments/assets/712035ad-eaf3-46c0-b111-f0dcbb3eb52d" />
+
 
 ## Local Architecture
 
