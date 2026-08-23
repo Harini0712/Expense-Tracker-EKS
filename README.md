@@ -318,7 +318,7 @@ flask db upgrade
   `backend/.env` includes `http://localhost:5173` exactly.
 - **401 errors right after login:** check `VITE_API_BASE_URL` matches
   where Flask is actually running.
-  ## Troubleshooting
+ 
 
 
 
