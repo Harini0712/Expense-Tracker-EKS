@@ -322,5 +322,273 @@ flask db upgrade
   where Flask is actually running.
  
 
+AWS ECS + ECR Deployment
 
+The Expense Tracker can also be deployed to AWS using Docker, Amazon ECR, Amazon ECS (Fargate), an Application Load Balancer (ALB), Amazon RDS PostgreSQL, and CloudWatch Logs.
+
+AWS Architecture
+
+                         Internet
+                            |
+                            v
+                 Application Load Balancer
+                            |
+                 +----------+----------+
+                 |                     |
+                 v                     v
+          Frontend Target       Backend Target
+             Group                  Group
+                 |                     |
+                 v                     v
+          ECS Frontend           ECS Backend
+          Container :80          Container :5000
+                                       |
+                                       v
+                                Amazon RDS
+                                PostgreSQL
+
+AWS Services Used
+
+Amazon ECR - stores the frontend and backend Docker images.
+
+Amazon ECS (Fargate) - runs the frontend and backend containers.
+
+Application Load Balancer (ALB) - provides the public entry point and routes traffic.
+
+Amazon RDS PostgreSQL - stores application data.
+
+Amazon CloudWatch Logs - stores ECS container logs.
+
+ECR Repositories
+
+Two ECR repositories are used:
+
+expense-tracker-frontend
+expense-tracker-backend
+
+Example frontend image:
+
+<AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/expense-tracker-frontend:v4
+
+Build and Push Docker Images
+
+Authenticate Docker with ECR:
+
+aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com
+
+Build the frontend image:
+
+docker build --no-cache \
+  --build-arg VITE_API_BASE_URL=http://<ALB-DNS>/api \
+  -t expense-tracker-frontend:v1 .
+
+Tag the image:
+
+docker tag expense-tracker-frontend:v1 \
+  <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/expense-tracker-frontend:v1
+
+Push the image to ECR:
+
+docker push \
+  <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/expense-tracker-frontend:v1
+
+The same build, tag, and push process is used for the backend image.
+
+ECS Cluster and Services
+
+The ECS cluster runs two services:
+
+expense-tracker-frontend-service
+expense-tracker-backend-service
+
+The frontend service runs the React application through Nginx:
+
+Frontend container
+Port: 80
+
+The backend service runs the Flask API through Gunicorn:
+
+Backend container
+Port: 5000
+
+Application Load Balancer
+
+The ALB provides the public endpoint for the application.
+
+The listener routes traffic based on the request path:
+
+/       -> Frontend Target Group
+/api/*  -> Backend Target Group
+
+Therefore, the frontend uses the ALB as the public API base URL:
+
+http://<ALB-DNS>/api
+
+The browser does not connect directly to the private ECS backend IP.
+
+Environment Variables
+
+The backend uses environment variables for database and application configuration.
+
+Example:
+
+FLASK_APP=run.py
+FLASK_ENV=production
+FLASK_DEBUG=0
+
+DATABASE_URL=postgresql://<username>:<password>@<RDS-ENDPOINT>:5432/expense_tracker
+
+JWT_SECRET_KEY=<long-random-secret>
+JWT_ACCESS_TOKEN_EXPIRES_MINUTES=60
+
+CORS_ORIGINS=http://<ALB-DNS>
+
+The frontend API URL is provided during the Docker build because Vite VITE_* variables are compiled into the frontend application:
+
+docker build \
+  --build-arg VITE_API_BASE_URL=http://<ALB-DNS>/api \
+  -t expense-tracker-frontend:v1 .
+
+Do not commit production secrets or .env files to GitHub. Use environment variables or a secrets-management solution for production credentials.
+
+ECS Deployment Flow
+
+Dockerfile
+    |
+    v
+Docker Build
+    |
+    v
+Docker Image
+    |
+    v
+Amazon ECR
+    |
+    v
+ECS Task Definition
+    |
+    v
+ECS Service
+    |
+    v
+Running Container
+
+When ECS starts a task, the task is registered with the appropriate ALB target group. ECS handles registration and deregistration as tasks are replaced.
+
+Health Checks
+
+Frontend target group:
+
+Protocol: HTTP
+Path: /
+Port: 80
+Success code: 200
+
+Backend target group:
+
+Protocol: HTTP
+Path: /
+Port: 5000
+Success code: 200
+
+Healthy ECS targets receive traffic from the ALB.
+
+CloudWatch Logs
+
+ECS container logs are sent to Amazon CloudWatch Logs.
+
+Typical log groups:
+
+/ecs/expense-tracker-frontend
+/ecs/expense-tracker-backend
+
+Frontend logs contain Nginx startup and access logs.
+
+Backend logs contain Gunicorn and application logs.
+
+AWS Application Flow
+
+User
+ |
+ v
+Application Load Balancer
+ |
+ +----------------------------+
+ |                            |
+ v                            v
+Frontend ECS                Backend ECS
+Nginx :80                   Flask :5000
+                              |
+                              v
+                         RDS PostgreSQL
+
+Local vs AWS
+
+Local development:
+
+React :5173
+   |
+Flask :5000
+   |
+PostgreSQL :5432
+
+AWS deployment:
+
+ALB :80
+   |
+   +--> Frontend ECS :80
+   |
+   +--> Backend ECS :5000
+              |
+              v
+          RDS PostgreSQL
+
+The application code remains decoupled from the infrastructure. Docker and ECS provide the runtime environment, while environment variables configure the application for each environment.
+
+Git Commands
+
+From the project root:
+
+git status
+git add .
+git commit -m "Add local full stack expense tracker setup"
+git push origin main
+
+Current Status
+
+The application has been tested locally with:
+
+React frontend running on Vite
+
+Flask backend running locally
+
+PostgreSQL database connected
+
+Alembic migrations applied
+
+Default categories seeded
+
+JWT authentication working
+
+Expense CRUD working
+
+Dashboard working
+
+Frontend → Backend → PostgreSQL flow verified
+
+Next Phase
+
+Local Full-Stack Application
+          |
+          v
+Docker
+          |
+          v
+Docker Compose
+          |
+          v
+Jenkins CI/CD
+          |
+          v
+Kubernetes
 
