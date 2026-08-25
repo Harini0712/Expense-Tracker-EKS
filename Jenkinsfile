@@ -2,15 +2,23 @@ pipeline {
     agent any
 
     environment {
-        AWS_ACCOUNT_ID   = '398934907594'
-        AWS_REGION       = 'ap-southeast-2'
-        ECR_REGISTRY     = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        BACKEND_REPO     = 'expense-tracker-backend'
-        FRONTEND_REPO    = 'expense-tracker-frontend'
-        ECS_CLUSTER      = 'expense-tracker-cluster'
-        ECS_SERVICE_BACKEND  = 'expense-tracker-backend-service'   // <-- replace with your real ECS service name
-        ECS_SERVICE_FRONTEND = 'expense-tracker-frontend-service'  // <-- replace with your real ECS service name
-        IMAGE_TAG        = "${env.BUILD_NUMBER}"
+        AWS_ACCOUNT_ID = '398934907594'
+        AWS_REGION     = 'ap-southeast-2'
+
+        ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+        BACKEND_REPO   = 'expense-tracker-backend'
+        FRONTEND_REPO  = 'expense-tracker-frontend'
+
+        ECS_CLUSTER = 'expense-tracker-cluster'
+
+        ECS_SERVICE_BACKEND  = 'expense-tracker-backend-service'
+        ECS_SERVICE_FRONTEND = 'expense-tracker-frontend-service'
+
+        // Temporary URL until we create ALB
+        VITE_API_BASE_URL = 'http://127.0.0.1:5000/api'
+
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -24,7 +32,10 @@ pipeline {
         stage('Build Backend Image') {
             steps {
                 dir('backend') {
-                    sh "docker build -t ${BACKEND_REPO}:${IMAGE_TAG} ."
+                    sh """
+                        docker build \
+                        -t ${BACKEND_REPO}:${IMAGE_TAG} .
+                    """
                 }
             }
         }
@@ -32,71 +43,108 @@ pipeline {
         stage('Build Frontend Image') {
             steps {
                 dir('frontend') {
-                    sh "docker build -t ${FRONTEND_REPO}:${IMAGE_TAG} --build-arg VITE_API_BASE_URL=${VITE_API_BASE_URL} ."
+                    sh """
+                        docker build \
+                        --build-arg VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+                        -t ${FRONTEND_REPO}:${IMAGE_TAG} .
+                    """
                 }
             }
         }
 
         stage('Login to ECR') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'   // <-- Jenkins credential ID, set this up in Jenkins first
-                ]]) {
-                    sh """
-                        aws ecr get-login-password --region ${AWS_REGION} | \
-                        docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                    """
-                }
+                sh """
+                    aws ecr get-login-password \
+                    --region ${AWS_REGION} | \
+                    docker login \
+                    --username AWS \
+                    --password-stdin ${ECR_REGISTRY}
+                """
             }
         }
 
         stage('Tag and Push Images') {
             steps {
                 sh """
-                    docker tag ${BACKEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
-                    docker tag ${BACKEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${BACKEND_REPO}:latest
-                    docker push ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
-                    docker push ${ECR_REGISTRY}/${BACKEND_REPO}:latest
+                    # Backend
+                    docker tag \
+                    ${BACKEND_REPO}:${IMAGE_TAG} \
+                    ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
 
-                    docker tag ${FRONTEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
-                    docker tag ${FRONTEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
-                    docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
-                    docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
+                    docker tag \
+                    ${BACKEND_REPO}:${IMAGE_TAG} \
+                    ${ECR_REGISTRY}/${BACKEND_REPO}:latest
+
+                    docker push \
+                    ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
+
+                    docker push \
+                    ${ECR_REGISTRY}/${BACKEND_REPO}:latest
+
+
+                    # Frontend
+                    docker tag \
+                    ${FRONTEND_REPO}:${IMAGE_TAG} \
+                    ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
+
+                    docker tag \
+                    ${FRONTEND_REPO}:${IMAGE_TAG} \
+                    ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
+
+                    docker push \
+                    ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
+
+                    docker push \
+                    ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
                 """
             }
         }
 
         stage('Deploy to ECS') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
-                ]]) {
-                    sh """
-                        aws ecs update-service \
-                          --cluster ${ECS_CLUSTER} \
-                          --service ${ECS_SERVICE_BACKEND} \
-                          --force-new-deployment \
-                          --region ${AWS_REGION}
+                sh """
+                    aws ecs update-service \
+                    --cluster ${ECS_CLUSTER} \
+                    --service ${ECS_SERVICE_BACKEND} \
+                    --force-new-deployment \
+                    --region ${AWS_REGION}
 
-                        aws ecs update-service \
-                          --cluster ${ECS_CLUSTER} \
-                          --service ${ECS_SERVICE_FRONTEND} \
-                          --force-new-deployment \
-                          --region ${AWS_REGION}
-                    """
-                }
+
+                    aws ecs update-service \
+                    --cluster ${ECS_CLUSTER} \
+                    --service ${ECS_SERVICE_FRONTEND} \
+                    --force-new-deployment \
+                    --region ${AWS_REGION}
+                """
             }
         }
     }
 
     post {
         success {
-            echo "Deployed backend and frontend to ECS cluster: ${ECS_CLUSTER}"
+            echo """
+            ========================================
+            PIPELINE SUCCESS
+            ========================================
+            Backend image pushed to ECR
+            Frontend image pushed to ECR
+            ECS services deployment triggered
+
+            Cluster:
+            ${ECS_CLUSTER}
+            ========================================
+            """
         }
+
         failure {
-            echo "Pipeline failed — check the stage logs above."
+            echo """
+            ========================================
+            PIPELINE FAILED
+            ========================================
+            Check the failed stage in Console Output.
+            ========================================
+            """
         }
     }
 }
